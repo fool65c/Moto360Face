@@ -9,9 +9,9 @@ import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
-import android.graphics.Path;
 import android.graphics.Rect;
 import android.graphics.Typeface;
+import android.os.BatteryManager;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
@@ -20,6 +20,11 @@ import android.support.wearable.watchface.WatchFaceService;
 import android.support.wearable.watchface.WatchFaceStyle;
 import android.view.SurfaceHolder;
 import android.widget.Toast;
+
+import net.heatherandkevin.moto360face.FaceAccents.BatteryFace;
+import net.heatherandkevin.moto360face.FaceAccents.DayFace;
+import net.heatherandkevin.moto360face.FaceAccents.DayOfMonth;
+import net.heatherandkevin.moto360face.FaceAccents.SecondsFace;
 
 import java.lang.ref.WeakReference;
 import java.util.Calendar;
@@ -96,6 +101,18 @@ public class Moto360Face extends CanvasWatchFaceService {
             }
         };
         private boolean mRegisteredTimeZoneReceiver = false;
+
+        /* Handler to update the battery level changes */
+        private float batteryLevel;
+        private final BroadcastReceiver mBatteryReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                int level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
+                int scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
+                batteryLevel = level / (float)scale;
+            }
+        };
+        private boolean mRegisteredBatteryReceiver = false;
         private boolean mMuteMode;
         private float mCenterX;
         private float mCenterY;
@@ -130,8 +147,9 @@ public class Moto360Face extends CanvasWatchFaceService {
         private boolean mBurnInProtection;
 
         private SecondsFace secondsFace;
-        private SecondsFace secondsFace2;
-        private SecondsFace secondsFace3;
+        private DayFace dayFace;
+        private DayOfMonth dayOfMonth;
+        private BatteryFace batteryFace;
 
         @Override
         public void onCreate(SurfaceHolder holder) {
@@ -298,12 +316,12 @@ public class Moto360Face extends CanvasWatchFaceService {
             mCenterX = width / 2f;
             mCenterY = height / 2f;
 
-            secondsFace = new SecondsFace(mCenterX, mCenterY + mCenterY / 2f, 45);
-//            dayFace = new DayFace(mCenterX + mCenterX / 3 + 5,mCenterY,45f,
-//                    mCenterX, mCenterY + mCenterY / 2f - 10, 55);
-            secondsFace2 = new SecondsFace(mCenterX - mCenterX / 3 - 5,mCenterY,45f);
-//                    mCenterX, mCenterY + mCenterY / 2f - 10, 55);
-            secondsFace3 = new SecondsFace(mCenterX ,mCenterY - mCenterY / 2,35f);
+            secondsFace = new SecondsFace(mCenterX, mCenterY + mCenterY / 2f - 10f, 55);
+            dayFace = new DayFace(mCenterX, mCenterY + mCenterY / 2f - 10f, 55,
+                    45, 20);
+            dayOfMonth = new DayOfMonth(mCenterX, mCenterY + mCenterY / 2f - 10f, 55,
+                    45, 20);
+            batteryFace = new BatteryFace(mCenterX ,mCenterY - mCenterY / 2.25f,35f);
 
             /*
              * Calculate lengths of different hands based on watch screen size.
@@ -396,6 +414,10 @@ public class Moto360Face extends CanvasWatchFaceService {
                 }
 
                 outerTickRadius = innerTickRadius - tickLength;
+
+                if (tickIndex == 3 || tickIndex == 9) {
+                    outerTickRadius += 5;
+                }
 
                 if (tickIndex >= 10 || tickIndex <= 2) {
                     topTickPaint = mTickStrokeHighPaint;
@@ -511,9 +533,12 @@ public class Moto360Face extends CanvasWatchFaceService {
 
             if (!mAmbient) {
                 secondsFace.draw(canvas, seconds);
-//                dayFace.draw(canvas,0,0);
-                secondsFace2.draw(canvas, seconds);
-                secondsFace3.draw(canvas, seconds);
+                dayFace.setCalendar(mCalendar);
+                dayFace.draw(canvas);
+                dayOfMonth.setCalendar(mCalendar);
+                dayOfMonth.draw(canvas);
+                batteryFace.draw(canvas, batteryLevel);
+//                canvas.drawText(mCalendar.getTime().toString(), 30, mCenterY, mRomanNumeralPaint);
             }
 
             final float minutesRotation = mCalendar.get(Calendar.MINUTE) * 6f + secondsRotation / 60f;
@@ -554,11 +579,11 @@ public class Moto360Face extends CanvasWatchFaceService {
             canvas.restore();
 
 
-//            canvas.drawCircle(
-//                    mCenterX,
-//                    mCenterY,
-//                    CENTER_GAP_AND_CIRCLE_RADIUS,
-//                    mTickAndCirclePaint);
+            canvas.drawCircle(
+                    mCenterX,
+                    mCenterY,
+                    CENTER_GAP_AND_CIRCLE_RADIUS,
+                    mTickAndCirclePaint);
         }
 
         @Override
@@ -579,20 +604,29 @@ public class Moto360Face extends CanvasWatchFaceService {
         }
 
         private void registerReceiver() {
-            if (mRegisteredTimeZoneReceiver) {
-                return;
+            if (!mRegisteredTimeZoneReceiver) {
+                mRegisteredTimeZoneReceiver = true;
+                IntentFilter filter = new IntentFilter(Intent.ACTION_TIMEZONE_CHANGED);
+                Moto360Face.this.registerReceiver(mTimeZoneReceiver, filter);
             }
-            mRegisteredTimeZoneReceiver = true;
-            IntentFilter filter = new IntentFilter(Intent.ACTION_TIMEZONE_CHANGED);
-            Moto360Face.this.registerReceiver(mTimeZoneReceiver, filter);
+
+            if (!mRegisteredBatteryReceiver) {
+                mRegisteredBatteryReceiver = true;
+                IntentFilter filter = new IntentFilter(Intent.ACTION_BATTERY_CHANGED);
+                Moto360Face.this.registerReceiver(mBatteryReceiver,filter);
+            }
         }
 
         private void unregisterReceiver() {
-            if (!mRegisteredTimeZoneReceiver) {
-                return;
+            if (mRegisteredTimeZoneReceiver) {
+                mRegisteredTimeZoneReceiver = false;
+                Moto360Face.this.unregisterReceiver(mTimeZoneReceiver);
             }
-            mRegisteredTimeZoneReceiver = false;
-            Moto360Face.this.unregisterReceiver(mTimeZoneReceiver);
+
+            if (mRegisteredBatteryReceiver) {
+                mRegisteredBatteryReceiver = false;
+                Moto360Face.this.unregisterReceiver(mBatteryReceiver);
+            }
         }
 
         /**
